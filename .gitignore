@@ -1,0 +1,4 @@
+env/
+shell.nix
+*.mp4
+*.csv
