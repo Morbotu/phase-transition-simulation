@@ -23,6 +23,8 @@ lam_s   = 0.24       # W/K m
 c_l     = 2100.      # J/kg K
 c_s     = 2900.      # J/kg K
 w       = 50e-3      # m # simulated from 0 to w distance
+h_air   = 6          # W/m^2 K
+R       = 7e-3       # m
 
 a_s = lam_s / (rho_s * c_s)
 a_l = lam_l / (rho_l * c_l)
@@ -89,13 +91,21 @@ def c_A(T, dT):
 
 # discrete timestep of liquid zone
 @njit
+def dT_liquid_loss(T):
+    return 2 * dt * h_air / (rho_l * c_l * R) * (T - T1)
+
+@njit
 def dT_liquid(T):
-    return a_l * dt / dx**2 * (T[2:] + T[:-2] - 2 * T[1:-1])
+    return a_l * dt / dx**2 * (T[2:] + T[:-2] - 2 * T[1:-1]) - dT_liquid_loss(T[1:-1])
 
 # discrete timestep of solid zone
 @njit
+def dT_solid_loss(T):
+    return 2 * dt * h_air / (rho_s * c_s * R) * (T - T1)
+
+@njit
 def dT_solid(T):
-    return a_s * dt / dx**2 * (T[2:] + T[:-2] - 2 * T[1:-1])
+    return a_s * dt / dx**2 * (T[2:] + T[:-2] - 2 * T[1:-1]) - dT_solid_loss(T[1:-1])
 
 # mushy zone heat conductivity
 @njit
@@ -104,10 +114,15 @@ def lam_phi(T, dT):
 
 # discrete timestep of mushy zone
 @njit
+def dT_mush_loss(T, dT):
+    return 2 * dt * h_air / (c_A(T, dT) * R) * (T - T1)
+
+@njit
 def dT_mush(T, dT):
     return dt / (2 * dx**2 * c_A(T[1:-1], dT)) * ((lam_phi(T[2:], dT) + lam_phi(T[1:-1], dT)) * T[2:] \
         + (lam_phi(T[:-2], dT) + lam_phi(T[1:-1], dT)) * T[:-2] \
-        - (lam_phi(T[2:], dT) + lam_phi(T[:-2], dT) + 2 * lam_phi(T[1:-1], dT)) * T[1:-1])
+        - (lam_phi(T[2:], dT) + lam_phi(T[:-2], dT) + 2 * lam_phi(T[1:-1], dT)) * T[1:-1]) \
+        - dT_mush_loss(T[1:-1], dT)
 
 
 # ---------------------------------------------------------------------------- #
@@ -182,7 +197,7 @@ dT = [.5] * len(T0) # *C # mushy zone region. Higher boundary condition requires
 T = [] # results array
 T_analytics = []
 
-playback = 3600 / 30 # playback speed
+playback = t1 / 30 # playback speed
 fps = 20 # fps for animation
 t_fps = 1 / fps / dt # number of iterations between each frame
 frames = np.where(np.arange(N, dtype=int) % int(t_fps * playback) == 0)[0] # all iterations that are displayed
