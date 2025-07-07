@@ -26,8 +26,6 @@ class MeltingFrontTracker:
         self.roi = None
         self.lines_data = []
         self.scale = None
-        self.scale_lines = []
-        self.scale_value_mm = None
         self.first_measurement = None
         self.settings_file = None
         self.data_file = None
@@ -35,11 +33,18 @@ class MeltingFrontTracker:
         self.window_height = self.root.winfo_height()
         self.orig_img_width = None
         self.orig_img_height = None
+        self.frame_time = None
+        self.scale_dist_px = tk.StringVar()
+        self.scale_dist_px.set("Dist: - px")
+        self.scale_text = tk.StringVar()
+        self.scale_text.set("Scale: 1 mm/px")
 
         self.img_width = None
         self.img_height = None
         self.old_img_width = None
         self.old_img_height = None
+        self.scale_lines = []
+        self.scaleY = []
 
         self.image_on_canvas = None
         
@@ -52,6 +57,7 @@ class MeltingFrontTracker:
 
         self.controls = tk.Frame(root)
         self.controls.pack()
+        self.interface = []
 
         self.roi_description = tk.Label(self.controls, text="Press <Return> to accept ROI")
         self.roi_description.pack(side=tk.LEFT, padx=10)
@@ -59,12 +65,12 @@ class MeltingFrontTracker:
 
         self.canvas.bind("<Button-1>", self.select_roi)
         self.canvas.bind("<B1-Motion>", self.select_roi)
-        self.canvas.bind("<ButtonRelease-1>", self.select_roi)
         self.root.bind("<Return>", self.select_roi)
+        self.root.bind("<Left>", self.prev_frame)
+        self.root.bind("<Right>", self.next_frame)
 
     def on_resize(self, event):
         if self.window_width != self.root.winfo_width() or self.window_height != self.root.winfo_height():
-            print("Resized")
             self.window_width = self.root.winfo_width()
             self.window_height = self.root.winfo_height()
             self.old_img_width = self.img_width
@@ -90,8 +96,6 @@ class MeltingFrontTracker:
                 self.load_interface()
             case 4: # Mouse down
                 self.roi = (event.x, event.y) * 2
-            case 5: # Mouse up
-                pass
             case 6: # Mouse drag
                 self.roi = self.roi[:2] + (event.x, event.y)
         
@@ -118,22 +122,86 @@ class MeltingFrontTracker:
         self.canvas.delete(self.roi_square)
 
     def load_interface(self):
+        self.set_scale_btn = tk.Button(self.controls, text="Set Scale", command=self.set_scale)
+        self.set_scale_btn.pack(side=tk.LEFT)
+
+        self.scale_label = tk.Label(self.controls, textvariable=self.scale_text)
+        self.scale_label.pack(side=tk.LEFT, padx=10)
+
         self.prev_btn = tk.Button(self.controls, text="Previous", command=self.prev_frame)
         self.prev_btn.pack(side=tk.LEFT)
 
         self.next_btn = tk.Button(self.controls, text="Next", command=self.next_frame)
         self.next_btn.pack(side=tk.LEFT)
 
-        self.frame_time = tk.StringVar()
-        self.frame_time.set("Time: 0 s")
         self.frame_time_label = tk.Label(self.controls, textvariable=self.frame_time)
         self.frame_time_label.pack(side=tk.LEFT, padx=10)
 
         self.total_time_label = tk.Label(self.controls, text=f"Max time: {self.total_frames / self.fps:.1f} s")
         self.total_time_label.pack(side=tk.LEFT, padx=10)
 
+        self.interface = [
+            self.set_scale_btn,
+            self.scale_label,
+            self.prev_btn,
+            self.next_btn,
+            self.frame_time_label,
+            self.total_time_label
+        ]
+
         self.load_frame()
-    
+
+    def close_set_scale(self):
+        self.scale_description.pack_forget()
+        self.scale_dist_label.pack_forget()
+        for scale_line in self.scale_lines:
+            self.canvas.delete(scale_line)
+        self.scaleY = []
+        self.scale_lines = []
+        self.scale_dist_px.set("Dist: - px")
+
+        self.canvas.unbind("<Button-1>")
+        self.root.unbind("<Return>")
+
+    def select_scale(self, event):
+        match int(event.type):
+            case 2: # Enter
+                if len(self.scaleY) != 2:
+                    messagebox.showerror("Error", "Please select two lines as reference.")
+                    return
+                real_dist = simpledialog.askfloat("Scale", "Enter real distance in mm between the two lines:")
+                px_dist = abs(self.scaleY[1] - self.scaleY[0])
+                self.scale = real_dist / px_dist * self.img_height / self.orig_img_height
+                self.scale_text.set(f"Scale: {self.scale:.3f} mm/px")
+                self.close_set_scale()
+                self.load_interface()
+            case 4: # Click
+                if len(self.scaleY) >= 2:
+                    for scale_line in self.scale_lines:
+                        self.canvas.delete(scale_line)
+                    self.scaleY = []
+                    self.scale_lines = []
+                    self.scale_dist_px.set("Dist: - px")
+                    return
+                self.scaleY.append(event.y)
+                self.scale_lines.append(self.canvas.create_line(0, event.y, self.img_width, event.y, fill="red"))
+
+                if len(self.scaleY) == 2:
+                    self.scale_dist_px.set(f"Dist: {abs(self.scaleY[1] - self.scaleY[0])} px")
+
+    def set_scale(self):
+        for interfaceitem in self.interface:
+            interfaceitem.pack_forget()
+
+        self.scale_description = tk.Label(self.controls, text="Click to set scale reference. Press <Enter> to accept.")
+        self.scale_description.pack(side=tk.LEFT, padx=10)
+
+        self.scale_dist_label = tk.Label(self.controls, textvariable=self.scale_dist_px)
+        self.scale_dist_label.pack(side=tk.LEFT, padx=10)
+
+        self.canvas.bind("<Button-1>", self.select_scale)
+        self.root.bind("<Return>", self.select_scale)
+
     def open_video(self):
         path = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mov")])
         if not path:
@@ -143,7 +211,9 @@ class MeltingFrontTracker:
         self.cap = cv2.VideoCapture(self.video_path)
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
+        self.frame_time = tk.StringVar()
+        self.frame_time.set("Time: 0 s")
+
     def load_frame(self):
         if self.cap:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
@@ -175,27 +245,13 @@ class MeltingFrontTracker:
         return resized
 
     def display_image(self):
-        draw = Image.fromarray(self.current_image.copy())
-
-        # if self.lines_data:
-        #     for idx, entry in enumerate(self.lines_data):
-        #         if entry["frame"] == self.current_frame_idx:
-        #             y = entry["y"]
-        #             draw = np.array(draw)
-        #             draw = cv2.line(draw, (0, y), (draw.shape[1], y), (255, 0, 0), 2)
-        #             draw = Image.fromarray(draw)
-        #         elif entry["frame"] < self.current_frame_idx:
-        #             y = entry["y"]
-        #             draw = np.array(draw)
-        #             draw = cv2.line(draw, (0, y), (draw.shape[1], y), (0, 0, 255), 1)
-        #             draw = Image.fromarray(draw)
-
         canvas_width = self.window_width
         canvas_height = self.window_height-30
 
-        draw = self.resize_image_to_fit_canvas(draw, canvas_width, canvas_height)
+        img = Image.fromarray(self.current_image.copy())
+        img = self.resize_image_to_fit_canvas(img, canvas_width, canvas_height)
 
-        img_tk = ImageTk.PhotoImage(draw)
+        img_tk = ImageTk.PhotoImage(img)
         self.canvas.config(width=img_tk.width(), height=img_tk.height())
 
         if self.image_on_canvas is None:
@@ -205,13 +261,13 @@ class MeltingFrontTracker:
         
         self.canvas.image = img_tk
 
-    def next_frame(self):
+    def next_frame(self, event=None):
         step = round(self.fps * self.frame_interval)
         self.current_frame_idx = min(self.current_frame_idx + step, self.total_frames - 1)
         self.update_time()
         self.load_frame()
 
-    def prev_frame(self):
+    def prev_frame(self, event=None):
         step = round(self.fps * self.frame_interval)
         self.current_frame_idx = max(self.current_frame_idx - step, 0)
         self.update_time()
