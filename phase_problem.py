@@ -3,7 +3,7 @@ from numba import njit
 from numba_progress import ProgressBar
 from tqdm import tqdm
 from scipy.special import erf, erfc
-from scipy.optimize import root, curve_fit
+from scipy.optimize import root
 import matplotlib.pyplot as plt
 from matplotlib import animation
 
@@ -36,10 +36,6 @@ a_l = lam_l / (rho_l * c_l)
 # --------------------------- Analytical formula's --------------------------- #
 
 # function for finding k of analytical solution, syntax with lambda is called currying https://en.wikipedia.org/wiki/Currying
-# root_function = lambda Tw: lambda k: np.exp(-k**2) / erf(k) \
-#     - c_s / c_l * np.sqrt(a_s / a_l) * (T1 - Tm) / (Tw - Tm) * np.exp(-k**2 * (a_l / a_s)) / erf(k * np.sqrt(a_l / a_s)) \
-#     - k * L * np.sqrt(np.pi) / c_l / (Tw - Tm)
-
 root_function = lambda Tw: lambda k: np.exp(-k**2) / erf(k) \
     + lam_s / lam_l * np.sqrt(a_l / a_s) * (T1 - Tm) / (Tw - Tm) * np.exp(-k**2 * (a_l / a_s)) / erfc(k * np.sqrt(a_l / a_s)) \
     - k * L * np.sqrt(np.pi) / c_l / (Tw - Tm)
@@ -193,7 +189,6 @@ def load_frames(frames, x, N, T0, dT, progress):
 x = np.arange(0, w, dx) # all cell positions
 t1 = 3600. # simulation time to run for
 N = int(t1 / dt) # number of iterations for simulation time
-# T0 = np.arange(100, 1000 + 50, 50) # *C # left boundary condition temperatures
 T0 = [120.]
 dT = [.5] * len(T0) # *C # mushy zone region. Higher boundary condition requires higher dT. Check theta_l graph for realistic distribution
 T = [] # results array
@@ -204,24 +199,13 @@ fps = 20 # fps for animation
 t_fps = 1 / fps / dt # number of iterations between each frame
 frames = np.where(np.arange(N, dtype=int) % int(t_fps * playback) == 0)[0] # all iterations that are displayed
 
-fit_func = lambda t, k: 2 * k * np.sqrt(a_l * t)
-t = frames * dt
-ks = []
 for i in range(len(T0)):
     print(f"\nCalculating T0={T0[i]}...")
     
     with ProgressBar(total=N) as progress: # start progressbar
         T.append(load_frames(frames, x, N, T0[i], dT[i], progress)) # start simulation
-    
-    s = [x[np.abs(T[-1][i] - Tm).argmin()] for i in range(len(frames))]
-    popt, popv = curve_fit(fit_func, t, s)
-
-    ks.append(popt[0])
 
     np.savetxt(f"returnsT0={T[-1][0][0]},dT={dT[-1]}.csv", T[-1], delimiter=",")
-
-out = np.array([T0, ks]).T
-np.savetxt(f"ks.csv", out, delimiter=",")
 
 for T0_i in set(T0):
     T_exact = np.zeros((frames.size, x.size))
