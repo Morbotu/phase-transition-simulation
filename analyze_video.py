@@ -27,21 +27,25 @@ class MeltingFrontTracker:
         self.dataY = []
         self.data_frames = []
         self.current_line = None
-        self.previous_line = None
-        self.setting_scale = False
-        self.scale = None
         self.first_measurement = None
+        self.previous_line = None
+        self.first_line = None
+        self.setting_scale = False
+        self.scale = 1
         self.settings_file = None
         self.data_file = None
         self.window_width = self.root.winfo_width()
         self.window_height = self.root.winfo_height()
         self.orig_img_width = None
         self.orig_img_height = None
-        self.frame_time = None
         self.scale_dist_px = tk.StringVar()
         self.scale_dist_px.set("Dist: - px")
         self.scale_text = tk.StringVar()
         self.scale_text.set("Scale: 1 mm/px")
+        self.frame_time = tk.StringVar()
+        self.frame_time.set("Time: 0 s")
+        self.measurement_distance = tk.StringVar()
+        self.measurement_distance.set("Distance: - mm")
 
         self.img_width = None
         self.img_height = None
@@ -75,6 +79,14 @@ class MeltingFrontTracker:
             self.canvas.bind("<B1-Motion>", self.select_roi)
             self.root.bind("<Return>", self.select_roi)
         else:
+            if os.path.exists(self.data_file):
+                df = pd.read_csv(self.data_file)
+                for i, row in df.iterrows():
+                    self.data_frames.append(row["frame"])
+                    self.dataY.append(
+                        (row["distance_mm"] + self.first_measurement) / self.scale * self.img_height / self.orig_img_height
+                    )
+                
             self.load_interface()
 
     def open_settings(self, path):       
@@ -90,16 +102,7 @@ class MeltingFrontTracker:
         self.roi = settings["roi"]
         self.scale = settings["scale"]
         self.scale_text.set(f"Scale: {self.scale:.3f} mm/px")
-
-        # self.first_measurement = settings["first_measurement"]
-
-        # if os.path.exists(self.data_file):
-        #     df = pd.read_csv(self.data_file)
-        #     self.lines_data = []
-        #     for i, row in df.iterrows():
-        #         frame = int(row["time_seconds"] * self.fps)
-        #         self.lines_data.append({"frame": frame, "y": row["pixel_distance"] + self.first_measurement})
-
+        self.first_measurement = settings["first_measurement"]
         self.roi_mode = False
 
     def on_resize(self, event):
@@ -112,12 +115,34 @@ class MeltingFrontTracker:
 
             if self.roi and self.roi_mode:
                 self.roi = (
-                    int(self.roi[0] * self.img_width / self.old_img_width),
-                    int(self.roi[1] * self.img_height / self.old_img_height),
-                    int(self.roi[2] * self.img_width / self.old_img_width),
-                    int(self.roi[3] * self.img_height / self.old_img_height),
+                    self.roi[0] * self.img_width / self.old_img_width,
+                    self.roi[1] * self.img_height / self.old_img_height,
+                    self.roi[2] * self.img_width / self.old_img_width,
+                    self.roi[3] * self.img_height / self.old_img_height,
                 )
                 self.canvas.coords(self.roi_square, *self.roi)
+
+            if self.dataY:
+                for i in range(len(self.dataY)):
+                    self.dataY[i] *= self.img_height / self.old_img_height
+                
+                if self.current_line is not None:
+                    coords = self.canvas.coords(self.current_line)
+                    coords[1] *= self.img_height / self.old_img_height
+                    coords[3] *= self.img_height / self.old_img_height
+                    self.canvas.coords(self.current_line, *coords)
+                
+                if self.previous_line is not None:
+                    coords = self.canvas.coords(self.previous_line)
+                    coords[1] *= self.img_height / self.old_img_height
+                    coords[3] *= self.img_height / self.old_img_height
+                    self.canvas.coords(self.previous_line, *coords)
+                
+                if self.first_line is not None:
+                    coords = self.canvas.coords(self.first_line)
+                    coords[1] *= self.img_height / self.old_img_height
+                    coords[3] *= self.img_height / self.old_img_height
+                    self.canvas.coords(self.first_line, *coords)
 
             if self.setting_scale and self.scaleY:
                 for i in range(len(self.scaleY)):
@@ -162,12 +187,30 @@ class MeltingFrontTracker:
         )
         self.canvas.delete(self.roi_square)
 
+    def delete_frame_data(self):
+        if self.current_frame_idx not in self.data_frames:
+            return
+        
+        if self.current_frame_idx == min(self.data_frames):
+            self.canvas.delete(self.first_line)
+            self.first_line = None
+        else:
+            self.canvas.delete(self.current_line)
+            self.current_line = None
+        i = self.data_frames.index(self.current_frame_idx)
+        del self.dataY[i]
+        del self.data_frames[i]
+
+        if self.data_frames and self.first_line is None:
+            first_y = self.dataY[np.argmin(self.data_frames)]
+            self.first_line = self.canvas.create_line(0, first_y, self.img_width, first_y, fill="green")
+
     def load_interface(self):
+        self.delete_btn = tk.Button(self.controls, text="Delete", command=self.delete_frame_data)
+        self.delete_btn.pack(side=tk.LEFT)
+
         self.set_scale_btn = tk.Button(self.controls, text="Set Scale", command=self.set_scale)
         self.set_scale_btn.pack(side=tk.LEFT)
-
-        self.scale_label = tk.Label(self.controls, textvariable=self.scale_text)
-        self.scale_label.pack(side=tk.LEFT, padx=10)
 
         self.prev_btn = tk.Button(self.controls, text="Previous", command=self.prev_frame)
         self.prev_btn.pack(side=tk.LEFT)
@@ -181,17 +224,39 @@ class MeltingFrontTracker:
         self.save_as_btn = tk.Button(self.controls, text="Save As", command=self.save_as)
         self.save_as_btn.pack(side=tk.LEFT)
 
+        self.scale_label = tk.Label(self.controls, textvariable=self.scale_text)
+        self.scale_label.pack(side=tk.LEFT, padx=10)
+
+        self.measurement_distance_label = tk.Label(self.controls, textvariable=self.measurement_distance)
+        self.measurement_distance_label.pack(side=tk.LEFT, padx=10)
+
         self.frame_time_label = tk.Label(self.controls, textvariable=self.frame_time)
         self.frame_time_label.pack(side=tk.LEFT, padx=10)
 
         self.total_time_label = tk.Label(self.controls, text=f"Max time: {self.total_frames / self.fps:.1f} s")
         self.total_time_label.pack(side=tk.LEFT, padx=10)
 
+        if self.data_frames:
+            first_y = self.dataY[np.argmin(self.data_frames)]
+            self.first_line = self.canvas.create_line(0, first_y, self.img_width, first_y, fill="green")
+
+        if self.current_frame_idx in self.data_frames and self.current_frame_idx != min(self.data_frames):
+            current_lineY = self.dataY[self.data_frames.index(self.current_frame_idx)]
+            self.measurement_distance.set(f"Distance: {(current_lineY - self.dataY[np.argmin(self.data_frames)]) * self.orig_img_height / self.img_height * self.scale:.3f} mm")
+            self.current_line = self.canvas.create_line(0, current_lineY, self.img_width, current_lineY, fill="red")
+        
+        step = round(self.fps * self.frame_interval)
+        if self.current_frame_idx - step in self.data_frames and self.current_frame_idx - step != min(self.data_frames):
+            previous_lineY = self.dataY[self.data_frames.index(self.current_frame_idx - step)]
+            self.previous_line = self.canvas.create_line(0, previous_lineY, self.img_width, previous_lineY, fill="blue")
+
         self.canvas.bind("<Button-1>", self.place_datapoint)
 
         self.interface = [
+            self.delete_btn,
             self.set_scale_btn,
             self.scale_label,
+            self.measurement_distance_label,
             self.prev_btn,
             self.next_btn,
             self.save_btn,
@@ -203,6 +268,15 @@ class MeltingFrontTracker:
         self.load_frame()
 
     def place_datapoint(self, event):
+        if not self.data_frames:
+            self.first_line = self.canvas.create_line(0, event.y, self.img_width, event.y, fill="green")
+        elif self.current_frame_idx <= min(self.data_frames):
+            self.canvas.coords(self.first_line, 0, event.y, self.img_width, event.y)
+        elif self.current_line is None:
+            self.current_line = self.canvas.create_line(0, event.y, self.img_width, event.y, fill="red")
+        else:
+            self.canvas.coords(self.current_line, 0, event.y, self.img_width, event.y)
+
         if self.current_frame_idx in self.data_frames:
             i = self.data_frames.index(self.current_frame_idx)
             self.dataY[i] = event.y
@@ -210,10 +284,7 @@ class MeltingFrontTracker:
             self.dataY.append(event.y)
             self.data_frames.append(self.current_frame_idx)
         
-        if self.current_line is None:
-            self.current_line = self.canvas.create_line(0, event.y, self.img_width, event.y, fill="red")
-        else:
-            self.canvas.coords(self.current_line, 0, event.y, self.img_width, event.y)
+        self.measurement_distance.set(f"Distance: {(event.y - self.dataY[np.argmin(self.data_frames)]) * self.orig_img_height / self.img_height * self.scale:.3f} mm")
 
     def save_as(self):
         filename = filedialog.asksaveasfilename(defaultextension=".json")
@@ -234,20 +305,23 @@ class MeltingFrontTracker:
             "frame_interval": self.frame_interval,
             "roi": self.roi,
             "scale": self.scale,
-            # "first_measurement": self.first_measurement,
+            "first_measurement": self.dataY[np.argmin(self.data_frames)] * self.scale * self.orig_img_height / self.img_height,
         }
 
         with open(self.settings_file, "w") as f:
             json.dump(settings, f, indent=4)
 
-        # data = []
-        # for entry in self.lines_data:
-        #     t = entry['frame'] / self.fps
-        #     px = entry['y'] - self.first_measurement if self.first_measurement is not None else entry['y']
-        #     mm = px * self.scale if self.scale else None
-        #     data.append([t, px, mm])
-        # df = pd.DataFrame(data, columns=["time_seconds", "pixel_distance", "distance_mm"])
-        # df.to_csv(self.data_file, index=False)
+        if not self.data_frames:
+            return
+
+        data = []
+        for i, frame in enumerate(self.data_frames):
+            t = frame / self.fps
+            mm = (self.dataY[i] - self.dataY[np.argmin(self.data_frames)]) * self.orig_img_height / self.img_height * self.scale
+            data.append([frame, t, mm])
+        df = pd.DataFrame(data, columns=["frame", "time", "distance_mm"])
+        df.sort_values(by="frame") \
+            .to_csv(self.data_file, index=False)
 
     def close_set_scale(self):
         self.scale_description.pack_forget()
@@ -291,6 +365,10 @@ class MeltingFrontTracker:
     def set_scale(self):
         for interfaceitem in self.interface:
             interfaceitem.pack_forget()
+        
+        self.canvas.delete(self.current_line)
+        self.canvas.delete(self.previous_line)
+        self.canvas.delete(self.first_line)
 
         self.setting_scale = True
 
@@ -318,8 +396,6 @@ class MeltingFrontTracker:
             self.fps = self.cap.get(cv2.CAP_PROP_FPS)
 
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.frame_time = tk.StringVar()
-        self.frame_time.set("Time: 0 s")
 
     def load_frame(self):
         if self.cap:
@@ -372,17 +448,19 @@ class MeltingFrontTracker:
         step = round(self.fps * self.frame_interval)
         self.current_frame_idx = min(self.current_frame_idx + step, self.total_frames - 1)
         
-        if self.current_frame_idx in self.data_frames:
+        if self.current_frame_idx in self.data_frames and self.current_frame_idx != min(self.data_frames):
             current_lineY = self.dataY[self.data_frames.index(self.current_frame_idx)]
+            self.measurement_distance.set(f"Distance: {(current_lineY - self.dataY[np.argmin(self.data_frames)]) * self.orig_img_height / self.img_height * self.scale:.3f} mm")
             if self.current_line is None:
                 self.current_line = self.canvas.create_line(0, current_lineY, self.img_width, current_lineY, fill="red")
             else:
                 self.canvas.coords(self.current_line, 0, current_lineY, self.img_width, current_lineY)
         elif self.current_line is not None:
+            self.measurement_distance.set("Distance: - mm")
             self.canvas.delete(self.current_line)
             self.current_line = None
         
-        if self.current_frame_idx - step in self.data_frames:
+        if self.current_frame_idx - step in self.data_frames and self.current_frame_idx - step != min(self.data_frames):
             previous_lineY = self.dataY[self.data_frames.index(self.current_frame_idx - step)]
             if self.previous_line is None:
                 self.previous_line = self.canvas.create_line(0, previous_lineY, self.img_width, previous_lineY, fill="blue")
@@ -399,17 +477,19 @@ class MeltingFrontTracker:
         step = round(self.fps * self.frame_interval)
         self.current_frame_idx = max(self.current_frame_idx - step, 0)
 
-        if self.current_frame_idx in self.data_frames:
+        if self.current_frame_idx in self.data_frames and self.current_frame_idx != min(self.data_frames):
             current_lineY = self.dataY[self.data_frames.index(self.current_frame_idx)]
+            self.measurement_distance.set(f"Distance: {(current_lineY - self.dataY[np.argmin(self.data_frames)]) * self.orig_img_height / self.img_height * self.scale:.3f} mm")
             if self.current_line is None:
                 self.current_line = self.canvas.create_line(0, current_lineY, self.img_width, current_lineY, fill="red")
             else:
                 self.canvas.coords(self.current_line, 0, current_lineY, self.img_width, current_lineY)
         elif self.current_line is not None:
+            self.measurement_distance.set("Distance: 0 mm")
             self.canvas.delete(self.current_line)
             self.current_line = None
 
-        if self.current_frame_idx - step in self.data_frames:
+        if self.current_frame_idx - step in self.data_frames and self.current_frame_idx - step != min(self.data_frames):
             previous_lineY = self.dataY[self.data_frames.index(self.current_frame_idx - step)]
             if self.previous_line is None:
                 self.previous_line = self.canvas.create_line(0, previous_lineY, self.img_width, previous_lineY, fill="blue")
