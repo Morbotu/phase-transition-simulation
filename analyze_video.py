@@ -24,7 +24,11 @@ class MeltingFrontTracker:
 
         self.roi_mode = True
         self.roi = None
-        self.lines_data = []
+        self.dataY = []
+        self.data_frames = []
+        self.current_line = None
+        self.previous_line = None
+        self.setting_scale = False
         self.scale = None
         self.first_measurement = None
         self.settings_file = None
@@ -59,15 +63,44 @@ class MeltingFrontTracker:
         self.controls.pack()
         self.interface = []
 
-        self.roi_description = tk.Label(self.controls, text="Press <Return> to accept ROI")
-        self.roi_description.pack(side=tk.LEFT, padx=10)
-        self.roi_square = None
-
-        self.canvas.bind("<Button-1>", self.select_roi)
-        self.canvas.bind("<B1-Motion>", self.select_roi)
-        self.root.bind("<Return>", self.select_roi)
         self.root.bind("<Left>", self.prev_frame)
         self.root.bind("<Right>", self.next_frame)
+        
+        if self.roi_mode:
+            self.roi_description = tk.Label(self.controls, text="Press <Return> to accept ROI")
+            self.roi_description.pack(side=tk.LEFT, padx=10)
+            self.roi_square = None
+
+            self.canvas.bind("<Button-1>", self.select_roi)
+            self.canvas.bind("<B1-Motion>", self.select_roi)
+            self.root.bind("<Return>", self.select_roi)
+        else:
+            self.load_interface()
+
+    def open_settings(self, path):       
+        self.settings_file = path
+        self.data_file = path.replace(".json", ".csv")
+
+        with open(path, "r") as f:
+            settings = json.load(f)
+
+        self.video_path = settings["video_path"]
+        self.fps = settings["fps"]
+        self.frame_interval = settings["frame_interval"]
+        self.roi = settings["roi"]
+        self.scale = settings["scale"]
+        self.scale_text.set(f"Scale: {self.scale:.3f} mm/px")
+
+        # self.first_measurement = settings["first_measurement"]
+
+        # if os.path.exists(self.data_file):
+        #     df = pd.read_csv(self.data_file)
+        #     self.lines_data = []
+        #     for i, row in df.iterrows():
+        #         frame = int(row["time_seconds"] * self.fps)
+        #         self.lines_data.append({"frame": frame, "y": row["pixel_distance"] + self.first_measurement})
+
+        self.roi_mode = False
 
     def on_resize(self, event):
         if self.window_width != self.root.winfo_width() or self.window_height != self.root.winfo_height():
@@ -85,6 +118,14 @@ class MeltingFrontTracker:
                     int(self.roi[3] * self.img_height / self.old_img_height),
                 )
                 self.canvas.coords(self.roi_square, *self.roi)
+
+            if self.setting_scale and self.scaleY:
+                for i in range(len(self.scaleY)):
+                    self.scaleY[i] = int(self.scaleY[i] * self.img_height / self.old_img_height)
+                    self.canvas.coords(self.scale_lines[i], 0, self.scaleY[i], self.img_width, self.scaleY[i])
+                if len(self.scaleY) == 2:
+                    self.scale_dist_px.set(f"Dist: {abs(self.scaleY[1] - self.scaleY[0])} px")
+
 
     def select_roi(self, event):
         match int(event.type):
@@ -134,22 +175,79 @@ class MeltingFrontTracker:
         self.next_btn = tk.Button(self.controls, text="Next", command=self.next_frame)
         self.next_btn.pack(side=tk.LEFT)
 
+        self.save_btn = tk.Button(self.controls, text="Save", command=self.save_all)
+        self.save_btn.pack(side=tk.LEFT)
+
+        self.save_as_btn = tk.Button(self.controls, text="Save As", command=self.save_as)
+        self.save_as_btn.pack(side=tk.LEFT)
+
         self.frame_time_label = tk.Label(self.controls, textvariable=self.frame_time)
         self.frame_time_label.pack(side=tk.LEFT, padx=10)
 
         self.total_time_label = tk.Label(self.controls, text=f"Max time: {self.total_frames / self.fps:.1f} s")
         self.total_time_label.pack(side=tk.LEFT, padx=10)
 
+        self.canvas.bind("<Button-1>", self.place_datapoint)
+
         self.interface = [
             self.set_scale_btn,
             self.scale_label,
             self.prev_btn,
             self.next_btn,
+            self.save_btn,
+            self.save_as_btn,
             self.frame_time_label,
             self.total_time_label
         ]
 
         self.load_frame()
+
+    def place_datapoint(self, event):
+        if self.current_frame_idx in self.data_frames:
+            i = self.data_frames.index(self.current_frame_idx)
+            self.dataY[i] = event.y
+        else:
+            self.dataY.append(event.y)
+            self.data_frames.append(self.current_frame_idx)
+        
+        if self.current_line is None:
+            self.current_line = self.canvas.create_line(0, event.y, self.img_width, event.y, fill="red")
+        else:
+            self.canvas.coords(self.current_line, 0, event.y, self.img_width, event.y)
+
+    def save_as(self):
+        filename = filedialog.asksaveasfilename(defaultextension=".json")
+        if not filename:
+            return
+        self.settings_file = filename
+        self.data_file = filename.replace(".json", ".csv")
+        self.save_all()
+
+    def save_all(self):
+        if not self.settings_file:
+            self.save_as()
+            return
+        
+        settings = {
+            "video_path": self.video_path,
+            "fps": self.fps,
+            "frame_interval": self.frame_interval,
+            "roi": self.roi,
+            "scale": self.scale,
+            # "first_measurement": self.first_measurement,
+        }
+
+        with open(self.settings_file, "w") as f:
+            json.dump(settings, f, indent=4)
+
+        # data = []
+        # for entry in self.lines_data:
+        #     t = entry['frame'] / self.fps
+        #     px = entry['y'] - self.first_measurement if self.first_measurement is not None else entry['y']
+        #     mm = px * self.scale if self.scale else None
+        #     data.append([t, px, mm])
+        # df = pd.DataFrame(data, columns=["time_seconds", "pixel_distance", "distance_mm"])
+        # df.to_csv(self.data_file, index=False)
 
     def close_set_scale(self):
         self.scale_description.pack_forget()
@@ -159,6 +257,7 @@ class MeltingFrontTracker:
         self.scaleY = []
         self.scale_lines = []
         self.scale_dist_px.set("Dist: - px")
+        self.setting_scale = False
 
         self.canvas.unbind("<Button-1>")
         self.root.unbind("<Return>")
@@ -193,6 +292,8 @@ class MeltingFrontTracker:
         for interfaceitem in self.interface:
             interfaceitem.pack_forget()
 
+        self.setting_scale = True
+
         self.scale_description = tk.Label(self.controls, text="Click to set scale reference. Press <Enter> to accept.")
         self.scale_description.pack(side=tk.LEFT, padx=10)
 
@@ -203,13 +304,19 @@ class MeltingFrontTracker:
         self.root.bind("<Return>", self.select_scale)
 
     def open_video(self):
-        path = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mov")])
+        path = filedialog.askopenfilename(filetypes=[("Video files or setting", "*.mp4 *.avi *.mov *.json")])
         if not path:
             messagebox.showerror("Error", "Invalid path selected.")
             raise "Invalid path selected"
-        self.video_path = path
-        self.cap = cv2.VideoCapture(self.video_path)
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        
+        if path.split(".")[-1] == "json":
+            self.open_settings(path)
+            self.cap = cv2.VideoCapture(self.video_path)
+        else:
+            self.video_path = path
+            self.cap = cv2.VideoCapture(self.video_path)
+            self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.frame_time = tk.StringVar()
         self.frame_time.set("Time: 0 s")
@@ -264,12 +371,54 @@ class MeltingFrontTracker:
     def next_frame(self, event=None):
         step = round(self.fps * self.frame_interval)
         self.current_frame_idx = min(self.current_frame_idx + step, self.total_frames - 1)
+        
+        if self.current_frame_idx in self.data_frames:
+            current_lineY = self.dataY[self.data_frames.index(self.current_frame_idx)]
+            if self.current_line is None:
+                self.current_line = self.canvas.create_line(0, current_lineY, self.img_width, current_lineY, fill="red")
+            else:
+                self.canvas.coords(self.current_line, 0, current_lineY, self.img_width, current_lineY)
+        elif self.current_line is not None:
+            self.canvas.delete(self.current_line)
+            self.current_line = None
+        
+        if self.current_frame_idx - step in self.data_frames:
+            previous_lineY = self.dataY[self.data_frames.index(self.current_frame_idx - step)]
+            if self.previous_line is None:
+                self.previous_line = self.canvas.create_line(0, previous_lineY, self.img_width, previous_lineY, fill="blue")
+            else:
+                self.canvas.coords(self.previous_line, 0, previous_lineY, self.img_width, previous_lineY)
+        elif self.previous_line is not None:
+            self.canvas.delete(self.previous_line)
+            self.previous_line = None
+
         self.update_time()
         self.load_frame()
 
     def prev_frame(self, event=None):
         step = round(self.fps * self.frame_interval)
         self.current_frame_idx = max(self.current_frame_idx - step, 0)
+
+        if self.current_frame_idx in self.data_frames:
+            current_lineY = self.dataY[self.data_frames.index(self.current_frame_idx)]
+            if self.current_line is None:
+                self.current_line = self.canvas.create_line(0, current_lineY, self.img_width, current_lineY, fill="red")
+            else:
+                self.canvas.coords(self.current_line, 0, current_lineY, self.img_width, current_lineY)
+        elif self.current_line is not None:
+            self.canvas.delete(self.current_line)
+            self.current_line = None
+
+        if self.current_frame_idx - step in self.data_frames:
+            previous_lineY = self.dataY[self.data_frames.index(self.current_frame_idx - step)]
+            if self.previous_line is None:
+                self.previous_line = self.canvas.create_line(0, previous_lineY, self.img_width, previous_lineY, fill="blue")
+            else:
+                self.canvas.coords(self.previous_line, 0, previous_lineY, self.img_width, previous_lineY)
+        elif self.previous_line is not None:
+            self.canvas.delete(self.previous_line)
+            self.previous_line = None
+
         self.update_time()
         self.load_frame()
 
