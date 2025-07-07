@@ -23,8 +23,8 @@ lam_s   = 0.24       # W/K m
 c_l     = 2100.      # J/kg K
 c_s     = 2900.      # J/kg K
 w       = 50e-3      # m # simulated from 0 to w distance
-h_air   = 6          # W/m^2 K
-R       = 7e-3       # m
+h_air   = 2.66       # W/m^2 K
+R       = 7e-3/2     # m
 
 a_s = lam_s / (rho_s * c_s)
 a_l = lam_l / (rho_l * c_l)
@@ -115,7 +115,9 @@ def lam_phi(T, dT):
 # discrete timestep of mushy zone
 @njit
 def dT_mush_loss(T, dT):
-    return 2 * dt * h_air / (c_A(T, dT) * R) * (T - T1)
+    return 2 * dt * h_air \
+        / ((1 - theta_l(T, dT)) * rho_s * c_s \
+        + theta_l(T, dT) * rho_l * c_l * R) * (T - T1)
 
 @njit
 def dT_mush(T, dT):
