@@ -13,8 +13,8 @@ from matplotlib import animation
 
 Tm      = 54.        # *C # melting temperature
 T1      = 30.        # *C # right boundary temperature
-dx      = 1e-4       # m
-dt      = 1e-4       # s
+dx      = 1e-5       # m
+dt      = 1e-5       # s
 L       = 2.1e5      # J/kg
 rho_l   = 780.       # kg/m^37
 rho_s   = 860.       # kg/m^3
@@ -190,7 +190,7 @@ x = np.arange(0, w, dx) # all cell positions
 t1 = 3600. # simulation time to run for
 N = int(t1 / dt) # number of iterations for simulation time
 T0 = [120.]
-dT = [.5] * len(T0) # *C # mushy zone region. Higher boundary condition requires higher dT. Check theta_l graph for realistic distribution
+dT = [.05] * len(T0) # *C # mushy zone region. Higher boundary condition requires higher dT. Check theta_l graph for realistic distribution
 T = [] # results array
 T_analytics = []
 
@@ -200,7 +200,7 @@ t_fps = 1 / fps / dt # number of iterations between each frame
 frames = np.where(np.arange(N, dtype=int) % int(t_fps * playback) == 0)[0] # all iterations that are displayed
 
 for i in range(len(T0)):
-    print(f"\nCalculating T0={T0[i]}...")
+    print(f"\nCalculating T0={T0[i]}, dT={dT[i]}...")
     
     with ProgressBar(total=N) as progress: # start progressbar
         T.append(load_frames(frames, x, N, T0[i], dT[i], progress)) # start simulation
