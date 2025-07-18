@@ -12,7 +12,7 @@ from matplotlib import animation
 # ---------------------------------------------------------------------------- #
 
 Tm      = 54.        # *C # melting temperature
-T1      = 30.        # *C # right boundary temperature
+T1      = 35.        # *C # right boundary temperature
 L       = 2.1e5      # J/kg
 rho_l   = 780.       # kg/m^37
 rho_s   = 860.       # kg/m^3
@@ -160,16 +160,19 @@ def load_frames(frames, x, N, T0, dT, dt, dx, progress):
 # ---------------------------------------------------------------------------- #
 
 t1 = 3600. # simulation time to run for
-dT = [0.5, 1., 5.] # *C # mushy zone region. Higher boundary condition requires higher dT. Check theta_l graph for realistic distribution
-dx = [1e-3, 1e-3, 1e-3]       # m
-dt = [1e-3, 1e-3, 1e-3]       # s
+# dT = [.5,     1.,   5.,   5.,   .5,  .05,   .5,   5.,  .05, .075,   .1,   .5] # *C # mushy zone region. Higher boundary condition requires higher dT. Check theta_l graph for realistic distribution
+# dx = [1e-3, 1e-3, 1e-3, 1e-3, 1e-4, 1e-4, 1e-4, 1e-4, 1e-5, 1e-5, 1e-5, 1e-5]       # m
+# dt = [1e-3, 1e-3, 1e-3, 1e-4, 1e-3, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4]       # s
+dT = [  .5, .05] # *C # mushy zone region. Higher boundary condition requires higher dT. Check theta_l graph for realistic distribution
+dx = [1e-4, 1e-5]       # m
+dt = [1e-5, 1e-5]       # s
 T0 = [120.] * len(dT)
 T = [] # results array
 
 fps = 1 # fps for animation
 
 for i in range(len(dT)):
-    print(f"\nCalculating T0={T0[i]}, dT={dT[i]}...")
+    print(f"\nCalculating T0={T0[i]}, dT={dT[i]}, dx={dx[i]:.0e}, dt={dt[i]:.0e}...")
     
     x = np.arange(0, w, dx[i]) # all cell positions
     N = int(t1 / dt[i]) # number of iterations for simulation time

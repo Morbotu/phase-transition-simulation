@@ -12,7 +12,7 @@ from matplotlib import animation
 # ---------------------------------------------------------------------------- #
 
 Tm      = 54.        # *C # melting temperature
-T1      = 30.        # *C # right boundary temperature
+T1      = 35.        # *C # right boundary temperature
 dx      = 1e-3       # m
 dt      = 1e-3       # s
 L       = 2.1e5      # J/kg
